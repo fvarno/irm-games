@@ -1,9 +1,51 @@
 from copy import deepcopy
+import torch
+from copy import deepcopy
 from typing import Dict, Tuple
 import numpy as np
 from torchvision.datasets import MNIST
 from fedsim.distributed.data_management import DataManager
-from . import utils
+
+
+def _xor(a, b):
+        return (a - b).abs()
+
+def _bernouli_sample(probability, sample_size):
+    return (torch.rand(sample_size) < probability).float()
+
+def process(data, labels, probability, label_prob):
+    images = data.reshape((-1, 28, 28))
+    labels = (labels < 5).float()
+
+    labels = _xor(labels, _bernouli_sample(label_prob, len(labels)))
+    colors = _xor(labels, _bernouli_sample(probability, len(labels)))
+    images = torch.stack([images, images], dim=1)
+    images[torch.tensor(range(len(images))), (1 - colors).long(), :, :] *= 0
+    return images.float()/255., labels[:, None] 
+
+
+class BasicVisionDataset(object):
+    def __init__(self, images, targets, transform=None, target_transform=None):
+        transform = deepcopy(transform)
+        assert len(images) == len(targets)
+        self.images = images
+        self.targets = targets
+        self.transform = transform
+        self.target_transform = target_transform
+
+        self.images = images
+        self.targets = targets
+
+    def __getitem__(self, index):
+        img, target = self.images[index], self.targets[index]
+        if self.transform is not None:
+            img = self.transform(img)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+        return img, target
+
+    def __len__(self):
+        return len(self.targets)
 
 def identity_fn(x):
     return x
@@ -13,7 +55,7 @@ class IRMDM(DataManager):
     def __init__(
         self,
         root,
-        dataset="mnist",
+        dataset="colored_mnist",
         probability_client1 = 0.2,
         probability_client2 = 0.1,
         probability_test = 0.9,
@@ -59,19 +101,19 @@ class IRMDM(DataManager):
             self.local_data = []
             self.local_targets = []
             
-            data_client1, targets_client1 = utils.process(
+            data_client1, targets_client1 = process(
                 tr_data[0:n//2],
                 tr_targets[0:n//2],
                 self.probability_client1,
                 self.label_prob_client1,
             )
-            data_client2, targets_client2 = utils.process(
+            data_client2, targets_client2 = process(
                 tr_data[n//2:],
                 tr_targets[n//2:],
                 self.probability_client2,
                 self.label_prob_client2,
             )
-            data_test, target_test = utils.process(
+            data_test, target_test = process(
                 tr_data,
                 tr_targets,
                 self.probability_client2,
@@ -83,7 +125,7 @@ class IRMDM(DataManager):
         else:
             raise NotImplementedError
 
-        return dict(train=None), utils.BasicVisionDataset(data_test, target_test)
+        return dict(train=None), BasicVisionDataset(data_test, target_test)
 
 
     def make_transforms(self):
@@ -95,7 +137,7 @@ class IRMDM(DataManager):
 
 
     def get_local_dataset(self, id):
-        tr_dset = utils.BasicVisionDataset(
+        tr_dset = BasicVisionDataset(
             self.custom_local_data[id],
             self.custom_local_targets[id],
             transform=self.train_transforms,
