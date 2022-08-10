@@ -54,7 +54,7 @@ def identity_fn(x):
 class IRMDM(DataManager):
     def __init__(
         self,
-        root,
+        root='data',
         dataset="colored_mnist",
         probability_client1 = 0.2,
         probability_client2 = 0.1,
